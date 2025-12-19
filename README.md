@@ -1,6 +1,6 @@
 # MTProxy Go 一键安装脚本 (Optimized Edition)
 
-> 基于 9seconds/mtg (Go版本) 的高性能 MTProto 代理一键部署工具。
+> 基于 9seconds/mtg (Go版本) 的高性能 MTProto 代理一键部署工具（支持导出ipv6链接）。
 
 [![Shell](https://img.shields.io/badge/Language-Shell-blue.svg)](https://github.com/weaponchiang/MTProxy)
 [![OS](https://img.shields.io/badge/OS-CentOS%20%7C%20Debian%20%7C%20Ubuntu%20%7C%20Alpine-success.svg)]()
@@ -36,3 +36,10 @@ MTProxy (Go版) 一键管理脚本
 
 ```markdown
 bash <(curl -LfsS https://raw.githubusercontent.com/weaponchiang/MTProxy/main/mtp.sh)
+
+
+## ❗️❗️免责声明
+
+本项目仅供学习与技术交流，请在下载后 24 小时内删除，禁止用于商业或非法目的。
+使用本脚本所搭建的服务，请严格遵守部署服务器所在地、服务提供商和用户所在国家/地区的相关法律法规。
+对于任何因不当使用本脚本而导致的法律纠纷或后果，脚本作者及维护者概不负责。
