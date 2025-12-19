@@ -22,3 +22,15 @@
 
 ```bash
 bash <(curl -LfsS [https://raw.githubusercontent.com/weaponchiang/MTProxy/refs/heads/main/mtp.sh](https://raw.githubusercontent.com/weaponchiang/MTProxy/refs/heads/main/mtp.sh))
+
+预览界面⬇️
+MTProxy (Go版) 一键管理脚本
+----------------------------
+1. 安装 / 重置配置   <-- 首次运行选这个
+2. 查看 链接信息     <-- 获取分享给 TG 的链接
+3. 开启 BBR 加速     <-- 优化网络速度
+4. 停止 服务
+5. 重启 服务
+6. 卸载 MTProxy
+0. 退出
+----------------------------
