@@ -34,6 +34,6 @@ MTProxy (Go版) 一键管理脚本
 
 在你的服务器终端（SSH）中执行以下命令即可：
 
+```markdown
 ```bash
-bash <(curl -LfsS [https://raw.githubusercontent.com/weaponchiang/MTProxy/main/mtp.sh](https://raw.githubusercontent.com/weaponchiang/MTProxy/main/mtp.sh))
-
+bash <(curl -LfsS https://raw.githubusercontent.com/weaponchiang/MTProxy/main/mtp.sh)
