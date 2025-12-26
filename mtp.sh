@@ -18,6 +18,7 @@ BIN_PATH="/usr/local/bin/mtg"
 MTP_CMD="/usr/local/bin/mtp"
 CONFIG_DIR="/etc/mtg"
 DEFAULT_VERSION="v2.1.7"
+# 脚本在线地址
 SCRIPT_URL="https://raw.githubusercontent.com/weaponchiang/MTProxy/main/mtp.sh"
 
 # --- 1. 系统检查与依赖 ---
@@ -40,16 +41,15 @@ check_init_system() {
     fi
 }
 
-# 修正后的版本获取函数
+# 优化后的版本获取
 get_version_info() {
-    # 获取本地版本: 尝试匹配 vX.X.X 格式
+    # 获取本地版本: 尝试获取包含数字和点的版本字符串
     if [ -f "$BIN_PATH" ]; then
-        LOCAL_VER=$($BIN_PATH version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
+        LOCAL_VER=$($BIN_PATH version 2>/dev/null | grep -i "version" | awk '{print $NF}')
         if [ -z "$LOCAL_VER" ]; then
-            # 备选方案：直接取输出的第二个字段
-            LOCAL_VER=$($BIN_PATH version 2>/dev/null | awk '{print $2}')
+            LOCAL_VER=$($BIN_PATH version 2>/dev/null | head -n 1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
         fi
-        [ -z "$LOCAL_VER" ] && LOCAL_VER="未知"
+        [ -z "$LOCAL_VER" ] && LOCAL_VER="已安装"
     else
         LOCAL_VER="未安装"
     fi
@@ -84,12 +84,13 @@ close_port() {
 # --- 3. 核心功能 ---
 
 update_script() {
-    echo -e "${Blue}正在更新管理脚本...${Nc}"
+    echo -e "${Blue}正在从远程更新脚本...${Nc}"
     TMP_FILE=$(mktemp)
     if wget -qO "$TMP_FILE" "$SCRIPT_URL"; then
         mv "$TMP_FILE" "$MTP_CMD" && chmod +x "$MTP_CMD"
+        # 覆盖当前正在执行的脚本（如果有）
         cp "$MTP_CMD" "$0" 2>/dev/null
-        echo -e "${Green}脚本更新成功！请重新输入 mtp 运行。${Nc}"
+        echo -e "${Green}脚本更新成功！请重新输入 'mtp' 运行。${Nc}"
         exit 0
     else
         echo -e "${Red}更新失败，请检查网络。${Nc}"
@@ -119,9 +120,10 @@ install_mtg() {
         mv "$BINARY" "$BIN_PATH" && chmod +x "$BIN_PATH"
         rm -rf "$TMP_DIR"
     else
-        echo -e "${Red}下载核心文件失败！${Nc}"; rm -rf "$TMP_DIR"; return
+        echo -e "${Red}下载失败！${Nc}"; rm -rf "$TMP_DIR"; return
     fi
     
+    # 安装/更新快捷指令
     wget -qO "$MTP_CMD" "$SCRIPT_URL" && chmod +x "$MTP_CMD"
     configure_mtg
 }
@@ -156,7 +158,7 @@ modify_config() {
     echo -e "PORT=${NEW_PORT}\nSECRET=${NEW_SECRET}\nDOMAIN=${NEW_DOMAIN}" > "${CONFIG_DIR}/config"
     
     install_service "$NEW_PORT" "$NEW_SECRET"
-    echo -e "${Green}配置已更新。${Nc}"
+    echo -e "${Green}配置修改完成。${Nc}"
 }
 
 install_service() {
@@ -169,7 +171,6 @@ After=network.target
 [Service]
 ExecStart=${BIN_PATH} simple-run 0.0.0.0:${PORT} ${SECRET}
 Restart=always
-LimitNOFILE=65535
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -188,13 +189,12 @@ EOF
 }
 
 show_info() {
-    if [ ! -f "${CONFIG_DIR}/config" ]; then echo -e "${Red}暂无配置信息${Nc}"; return; fi
+    if [ ! -f "${CONFIG_DIR}/config" ]; then return; fi
     source "${CONFIG_DIR}/config"
     
-    echo -e "${Blue}正在获取 IP 地址 (IPv6 探测约需几秒)...${Nc}"
-    # 使用多个源提高成功率
-    IP4=$(curl -s4 --connect-timeout 5 ip.sb || curl -s4 --connect-timeout 5 ipinfo.io/ip)
-    IP6=$(curl -s6 --connect-timeout 5 ip.sb || curl -s6 --connect-timeout 5 icanhazip.com)
+    echo -e "${Blue}正在获取 IP 地址 (IPv6 探测约 5s)...${Nc}"
+    IP4=$(curl -s4 --connect-timeout 5 ip.sb || curl -s4 ipinfo.io/ip)
+    IP6=$(curl -s6 --connect-timeout 5 ip.sb || curl -s6 icanhazip.com)
     
     echo -e "\n${Green}======= MTProxy 配置信息 =======${Nc}"
     echo -e "端口  : ${Yellow}${PORT}${Nc}"
@@ -229,24 +229,25 @@ menu() {
     echo -e "4. 更新 管理脚本 (mtp.sh)"
     echo -e "5. 重启 服务"
     echo -e "6. 停止 服务"
-    echo -e "7. 卸载 MTProxy"
+    echo -e "7. 卸载 MTProxy (彻底清理)"
     echo -e "0. 退出"
     echo -e "----------------------------"
-    read -p "请选择 [0-7]: " choice
+    read -p "选择 [0-7]: " choice
     case "$choice" in
         1) install_mtg ;;
         2) modify_config ;;
         3) show_info ;;
         4) update_script ;;
-        5) systemctl restart mtg 2>/dev/null || rc-service mtg restart 2>/dev/null; echo -e "${Green}已尝试重启服务${Nc}" ;;
-        6) systemctl stop mtg 2>/dev/null || rc-service mtg stop 2>/dev/null; echo -e "${Yellow}已尝试停止服务${Nc}" ;;
+        5) systemctl restart mtg 2>/dev/null || rc-service mtg restart 2>/dev/null; echo -e "${Green}已重启${Nc}" ;;
+        6) systemctl stop mtg 2>/dev/null || rc-service mtg stop 2>/dev/null; echo -e "${Yellow}已停止${Nc}" ;;
         7) 
             [ -f "${CONFIG_DIR}/config" ] && source "${CONFIG_DIR}/config" && close_port "$PORT"
             systemctl stop mtg 2>/dev/null; systemctl disable mtg 2>/dev/null
             rm -rf "$CONFIG_DIR" "$BIN_PATH" /etc/systemd/system/mtg.service /etc/init.d/mtg
-            echo -e "${Green}卸载完成。${Nc}" ;;
+            # 关键：删除脚本自身快捷方式
+            rm -f "$MTP_CMD"
+            echo -e "${Green}卸载完成！'mtp' 指令已失效。${Nc}" ;;
         0) exit 0 ;;
-        *) echo "无效选择" ;;
     esac
 }
 
