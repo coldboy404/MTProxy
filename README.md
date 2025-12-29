@@ -1,6 +1,6 @@
-# MTProxy Go 一键安装脚本 (支持ipv6)
+# MTProxy Go/Python 一键安装脚本 (支持ipv6)
 
-> 基于 9seconds/mtg (Go版本) 的高性能 MTProto 代理一键部署工具（支持导出ipv6链接）。
+> 基于 9seconds/mtg (Go版本) 和alexbers/mtprotoproxy（Python版本）的高性能 MTProto 代理一键部署工具（支持导出ipv6链接）。
 
 [![Shell](https://img.shields.io/badge/Language-Shell-blue.svg)](https://github.com/weaponchiang/MTProxy)
 [![OS](https://img.shields.io/badge/OS-CentOS%20%7C%20Debian%20%7C%20Ubuntu%20%7C%20Alpine-success.svg)]()
