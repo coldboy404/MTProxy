@@ -36,7 +36,7 @@ bash <(curl -LfsS https://raw.githubusercontent.com/weaponchiang/MTProxy/main/mt
 
 ## 📖 使用指南
 ​脚本运行后将显示如下菜单：
-MTProxy (Go版) 一键管理脚本
+MTProxy 一键管理脚本
 ----------------------------
 1. 安装 / 重置 MTProxy
 2. 修改 端口或域名
