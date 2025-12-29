@@ -46,10 +46,16 @@ MTProxy 一键管理脚本
 7. 卸载 MTProxy
 0. 退出
 
+---
 
-​🤝 鸣谢
-​核心驱动：
-​9seconds/mtg
-​alexbers/mtprotoproxy
-​参考了 ellermister/mtproxy 的配置逻辑。
-​<!-- end list -->
+### 🤝 鸣谢
+
+本脚本的顺利运行离不开以下优秀开源项目的支持：
+
+* **Go 版核心：** [9seconds/mtg](https://github.com/9seconds/mtg) (高性能、低内存占用的完美实现)
+* **Python 版核心：** [alexbers/mtprotoproxy](https://github.com/alexbers/mtprotoproxy) (协议支持极佳的经典之作)
+* **逻辑参考：** 感谢 [ellermister/mtproxy](https://github.com/ellermister/mtproxy) 提供的优秀配置与安装思路。
+
+---
+
+​
