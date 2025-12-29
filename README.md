@@ -45,3 +45,11 @@ MTProxy 一键管理脚本
 6. 停止 服务
 7. 卸载 MTProxy
 0. 退出
+
+
+​🤝 鸣谢
+​核心驱动：
+​9seconds/mtg
+​alexbers/mtprotoproxy
+​参考了 ellermister/mtproxy 的配置逻辑。
+​<!-- end list -->
