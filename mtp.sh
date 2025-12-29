@@ -4,7 +4,6 @@
 #   Description: MTProxy (Go & Python) One-click Installer
 #=========================================================
 
-# 颜色定义
 Red="\033[31m"
 Green="\033[32m"
 Yellow="\033[33m"
@@ -13,14 +12,11 @@ Nc="\033[0m"
 
 set -u
 
-# --- 全局配置 ---
 BIN_PATH="/usr/local/bin/mtg"
 PY_DIR="/opt/mtprotoproxy"
 MTP_CMD="/usr/local/bin/mtp"
 CONFIG_DIR="/etc/mtg"
 SCRIPT_URL="https://raw.githubusercontent.com/weaponchiang/MTProxy/main/mtp.sh"
-
-# --- 1. 基础环境 ---
 
 check_root() {
     if [ "$(id -u)" != "0" ]; then
@@ -57,12 +53,10 @@ close_port() {
     iptables -D INPUT -p tcp --dport ${PORT} -j ACCEPT 2>/dev/null
 }
 
-# --- 2. 安装/配置逻辑 ---
-
 install_mtp() {
     echo -e "${Yellow}请选择要安装的版本：${Nc}"
     echo -e "1) Go 版 (mtg - 占用极低，高性能)"
-    echo -e "2) Python 版 (mtprotoproxy - 功能全面，经典稳定)"
+    echo -e "2) Python 版 (mtprotoproxy - 支持更灵活的混淆)"
     read -p "选择 [1-2]: " core_choice
 
     if [ "$core_choice" == "2" ]; then
@@ -85,7 +79,7 @@ install_go_version() {
     VER_NUM=${VERSION#v}
     DOWNLOAD_URL="https://github.com/9seconds/mtg/releases/download/${VERSION}/mtg-${VER_NUM}-linux-${ARCH}.tar.gz"
     
-    echo -e "${Blue}正在安装 Go 版核心...${Nc}"
+    echo -e "${Blue}正在下载 Go 版核心...${Nc}"
     wget -qO- "$DOWNLOAD_URL" | tar xz -C /tmp
     mv /tmp/mtg-*/mtg "$BIN_PATH" && chmod +x "$BIN_PATH"
     
@@ -113,40 +107,43 @@ EOF
 
 install_py_version() {
     echo -e "${Blue}正在准备 Python 环境...${Nc}"
+    # 自动修复 dpkg 锁定问题
+    dpkg --configure -a >/dev/null 2>&1
+    
     if command -v apt-get >/dev/null 2>&1; then
-        apt-get update && apt-get install -y python3-dev python3-pip git xxd || {
-            echo -e "${Red}检测到 dpkg 锁定或安装失败，请先运行: dpkg --configure -a${Nc}"
-            exit 1
-        }
+        apt-get update && apt-get install -y python3-dev python3-pip git xxd python3-cryptography
     elif command -v yum >/dev/null 2>&1; then
         yum install -y python3-devel python3-pip git vim-common
     fi
 
     rm -rf "$PY_DIR"
     git clone https://github.com/alexbers/mtprotoproxy.git "$PY_DIR"
-    pip3 install --upgrade pip
-    pip3 install -r "${PY_DIR}/requirements.txt" --break-system-packages || pip3 install pycryptodome uvloop --break-system-packages
+    pip3 install --upgrade pip --break-system-packages 2>/dev/null
+    pip3 install -r "${PY_DIR}/requirements.txt" --break-system-packages || pip3 install pycryptodome uvloop cryptography --break-system-packages
 
     mkdir -p "$CONFIG_DIR"
-    read -p "伪装域名 (默认: www.icloud.com): " DOMAIN
-    DOMAIN=${DOMAIN:-www.icloud.com}
+    read -p "伪装域名 (默认: www.microsoft.com): " DOMAIN
+    DOMAIN=${DOMAIN:-www.microsoft.com}
     
-    SECRET_HEX=$(head -c 16 /dev/urandom | xxd -ps | tr -d '[:space:]')
+    # 密钥生成
+    SECRET_RAW=$(head -c 16 /dev/urandom | xxd -ps | tr -d '[:space:]')
     DOMAIN_HEX=$(echo -n "$DOMAIN" | xxd -p | tr -d '[:space:]')
-    FINAL_SECRET="ee${SECRET_HEX}${DOMAIN_HEX}"
+    FINAL_SECRET="ee${SECRET_RAW}${DOMAIN_HEX}"
 
     read -p "端口 (默认随机): " PORT
     PORT=${PORT:-$((10000 + RANDOM % 20000))}
 
-    echo -e "CORE=PY\nPORT=${PORT}\nSECRET=${FINAL_SECRET}\nDOMAIN=${DOMAIN}\nRAW_SECRET=${SECRET_HEX}\nDOMAIN_HEX=${DOMAIN_HEX}" > "${CONFIG_DIR}/config"
+    echo -e "CORE=PY\nPORT=${PORT}\nSECRET=${FINAL_SECRET}\nDOMAIN=${DOMAIN}\nRAW_SECRET=${SECRET_RAW}\nDOMAIN_HEX=${DOMAIN_HEX}" > "${CONFIG_DIR}/config"
 
+    # 修正后的启动命令 (不带 -p -s 标签，直接按顺序传值)
+    # 顺序：python3 mtprotoproxy.py [端口] [密钥] -t [伪装域名HEX]
     cat > /etc/systemd/system/mtg.service <<EOF
 [Unit]
 Description=MTProxy Python Service
 After=network.target
 [Service]
 WorkingDirectory=${PY_DIR}
-ExecStart=/usr/bin/python3 mtprotoproxy.py -p ${PORT} -s ${SECRET_HEX} -t ${DOMAIN_HEX}
+ExecStart=/usr/bin/python3 mtprotoproxy.py ${PORT} ${SECRET_RAW} -t ${DOMAIN_HEX}
 Restart=always
 [Install]
 WantedBy=multi-user.target
@@ -157,18 +154,14 @@ EOF
 finish_install() {
     open_port "$1"
     systemctl daemon-reload && systemctl enable mtg && systemctl restart mtg
-    # 写入快捷键指令
     wget -qO "$MTP_CMD" "$SCRIPT_URL" && chmod +x "$MTP_CMD"
     
     echo -e "\n${Green}========================================${Nc}"
     echo -e "${Green}服务已安装并启动成功！${Nc}"
-    echo -e "${Yellow}今后您可以直接输入 [ mtp ] 进入管理菜单。${Nc}"
+    echo -e "${Yellow}快捷管理指令: mtp ${Nc}"
     echo -e "${Green}========================================${Nc}\n"
-    
     show_info
 }
-
-# --- 3. 管理功能 ---
 
 modify_config() {
     if [ ! -f "${CONFIG_DIR}/config" ]; then echo -e "${Red}请先安装！${Nc}"; return; fi
@@ -190,7 +183,8 @@ modify_config() {
         SECRET_RAW=$(head -c 16 /dev/urandom | xxd -ps | tr -d '[:space:]')
         D_HEX=$(echo -n "$NEW_DOMAIN" | xxd -p | tr -d '[:space:]')
         NEW_SECRET="ee${SECRET_RAW}${D_HEX}"
-        sed -i "s|python3 mtprotoproxy.py .*|python3 mtprotoproxy.py -p ${NEW_PORT} -s ${SECRET_RAW} -t ${D_HEX}|" /etc/systemd/system/mtg.service
+        # 修正修改配置时的参数顺序
+        sed -i "s|python3 mtprotoproxy.py .*|python3 mtprotoproxy.py ${NEW_PORT} ${SECRET_RAW} -t ${D_HEX}|" /etc/systemd/system/mtg.service
         echo -e "CORE=PY\nPORT=${NEW_PORT}\nSECRET=${NEW_SECRET}\nDOMAIN=${NEW_DOMAIN}\nRAW_SECRET=${SECRET_RAW}\nDOMAIN_HEX=${D_HEX}" > "${CONFIG_DIR}/config"
     fi
 
@@ -202,16 +196,13 @@ modify_config() {
 show_info() {
     [ ! -f "${CONFIG_DIR}/config" ] && return
     source "${CONFIG_DIR}/config"
-    echo -e "${Blue}正在探测 IP 地址...${Nc}"
-    IP4=$(curl -s4 --connect-timeout 5 ip.sb || curl -s4 ipinfo.io/ip)
-    IP6=$(curl -s6 --connect-timeout 5 ip.sb || curl -s6 icanhazip.com)
+    IP=$(curl -s4 ip.sb || curl -s4 ipinfo.io/ip)
     
     echo -e "\n${Green}======= MTProxy 信息 (${CORE}版) =======${Nc}"
     echo -e "端口  : ${Yellow}${PORT}${Nc}"
     echo -e "域名  : ${Blue}${DOMAIN}${Nc}"
     echo -e "密钥  : ${Yellow}${SECRET}${Nc}"
-    [ -n "$IP4" ] && echo -e "IPv4 链接: ${Green}tg://proxy?server=${IP4}&port=${PORT}&secret=${SECRET}${Nc}"
-    [ -n "$IP6" ] && echo -e "IPv6 链接: ${Green}tg://proxy?server=[${IP6}]&port=${PORT}&secret=${SECRET}${Nc}"
+    echo -e "链接  : ${Green}tg://proxy?server=${IP}&port=${PORT}&secret=${SECRET}${Nc}"
     echo -e "========================================\n"
 }
 
@@ -227,8 +218,6 @@ uninstall_mtp() {
     rm -rf "$CONFIG_DIR" "$BIN_PATH" "$PY_DIR" "$MTP_CMD"
     echo -e "${Green}卸载成功。${Nc}"
 }
-
-# --- 4. 菜单 ---
 
 menu() {
     clear
