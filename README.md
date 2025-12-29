@@ -25,6 +25,13 @@
 ```markdown
 bash <(curl -LfsS https://raw.githubusercontent.com/weaponchiang/MTProxy/main/mtp.sh)
 ```
+### 🚀 快捷管理
+
+安装完成后，你可以随时在终端输入以下快捷命令来调出管理菜单：
+
+```bash
+mtp
+
 
 ## ✨ 功能特性
 
