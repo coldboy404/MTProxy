@@ -73,7 +73,7 @@ install_go_version() {
     echo -e "${Blue}正在下载 Go 核心...${Nc}"
     wget -qO- "https://github.com/9seconds/mtg/releases/download/${VERSION}/mtg-${VERSION#v}-linux-${ARCH}.tar.gz" | tar xz -C /tmp
     mv /tmp/mtg-*/mtg "$BIN_PATH" && chmod +x "$BIN_PATH"
-    
+
     mkdir -p "$CONFIG_DIR"
     read -p "伪装域名 (默认: azure.microsoft.com): " DOMAIN
     DOMAIN=${DOMAIN:-azure.microsoft.com}
@@ -82,7 +82,7 @@ install_go_version() {
     PORT=${PORT:-$((10000 + RANDOM % 20000))}
 
     echo -e "CORE=GO\nPORT=${PORT}\nSECRET=${SECRET}\nDOMAIN=${DOMAIN}" > "${CONFIG_DIR}/config"
-    
+
     cat > /etc/systemd/system/mtg.service <<EOF
 [Unit]
 Description=MTProxy Service
@@ -102,11 +102,11 @@ install_py_version() {
     rm -rf "$PY_DIR"
     git clone https://github.com/alexbers/mtprotoproxy.git "$PY_DIR"
     pip3 install pycryptodome uvloop --break-system-packages
-    
+
     mkdir -p "$CONFIG_DIR"
     read -p "伪装域名 (默认: azure.microsoft.com): " DOMAIN
     DOMAIN=${DOMAIN:-azure.microsoft.com}
-    
+
     RAW_S=$(head -c 16 /dev/urandom | xxd -ps -c 16 | tr -d '[:space:]')
     D_HEX=$(echo -n "$DOMAIN" | xxd -p -c 256 | tr -d '[:space:]')
     read -p "端口 (默认随机): " PORT
@@ -152,7 +152,7 @@ show_info() {
     echo -e "${Blue}正在探测外网地址 (支持 IPv6)...${Nc}"
     IP4=$(curl -s4 --connect-timeout 5 ip.sb || curl -s4 ipinfo.io/ip)
     IP6=$(curl -s6 --connect-timeout 5 ip.sb || curl -s6 icanhazip.com)
-    
+
     echo -e "\n${Green}======= MTProxy 链接信息 (${CORE}版) =======${Nc}"
     echo -e "代理端口: ${Yellow}${PORT}${Nc} | 伪装域名: ${Blue}${DOMAIN}${Nc}"
     echo -e "代理密钥: ${Yellow}${SECRET}${Nc}"
@@ -161,13 +161,52 @@ show_info() {
     echo -e "========================================\n"
 }
 
+# --- 深度卸载逻辑 ---
+uninstall_all() {
+    echo -e "${Yellow}正在执行深度卸载...${Nc}"
+    
+    # 1. 停止服务并移除 systemd 配置
+    [[ -f "${CONFIG_DIR}/config" ]] && source "${CONFIG_DIR}/config" && close_port "$PORT"
+    systemctl stop mtg 2>/dev/null
+    systemctl disable mtg 2>/dev/null
+    rm -f /etc/systemd/system/mtg.service
+    systemctl daemon-reload
+
+    # 2. 移除程序目录和快捷命令
+    rm -rf "$CONFIG_DIR"
+    rm -rf "$PY_DIR"
+    rm -f "$BIN_PATH"
+
+    # 3. 卸载 Python 库依赖 (仅针对本工具使用的库)
+    echo -e "${Blue}正在清理依赖库...${Nc}"
+    if command -v pip3 >/dev/null 2>&1; then
+        pip3 uninstall -y pycryptodome uvloop 2>/dev/null
+    fi
+
+    # 4. 移除安装阶段安装的系统软件包 (慎重: 仅移除本脚本明确安装的)
+    # 注意：为了系统安全，不建议移除 python3 本身，但可以移除相关的辅助包
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get purge -y python3-cryptography xxd >/dev/null 2>&1
+        apt-get autoremove -y >/dev/null 2>&1
+    elif command -v yum >/dev/null 2>&1; then
+        yum remove -y python3-cryptography vim-common >/dev/null 2>&1
+        yum autoremove -y >/dev/null 2>&1
+    fi
+
+    # 最后移除快捷脚本本身
+    rm -f "$MTP_CMD"
+    
+    echo -e "${Green}所有程序、配置及相关依赖已彻底卸载。${Nc}"
+    exit 0
+}
+
 # --- 菜单界面 ---
 
 menu() {
     clear
     echo -e "${Green}MTProxy (Go/Python) 多版本脚本${Nc}"
     echo -e "----------------------------------"
-    
+
     if systemctl is-active --quiet mtg; then
         CURRENT_CORE="未知"
         [[ -f "${CONFIG_DIR}/config" ]] && source "${CONFIG_DIR}/config" && CURRENT_CORE=$CORE
@@ -175,7 +214,7 @@ menu() {
     else
         echo -e "服务状态: ${Red}○ 已停止${Nc}"
     fi
-    
+
     echo -e "----------------------------------"
     echo -e "1. 安装 / 重置"
     echo -e "2. 修改 端口/域名"
@@ -198,12 +237,7 @@ menu() {
         4) update_script ;;
         5) systemctl restart mtg; echo -e "${Green}服务已重启${Nc}" ;;
         6) systemctl stop mtg; echo -e "${Yellow}服务已停止${Nc}" ;;
-        7) 
-            [[ -f "${CONFIG_DIR}/config" ]] && source "${CONFIG_DIR}/config" && close_port "$PORT"
-            systemctl stop mtg 2>/dev/null; systemctl disable mtg 2>/dev/null
-            rm -f /etc/systemd/system/mtg.service
-            rm -rf "$CONFIG_DIR" "$BIN_PATH" "$PY_DIR" "$MTP_CMD"
-            echo -e "${Green}已彻底卸载。${Nc}" ;;
+        7) uninstall_all ;;
         *) exit 0 ;;
     esac
 }
