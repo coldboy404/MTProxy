@@ -10,7 +10,6 @@ Yellow="\033[33m"
 Blue="\033[34m"
 Nc="\033[0m"
 
-# 取消严格模式
 set +u
 
 BIN_PATH="/usr/local/bin/mtg"
@@ -59,8 +58,8 @@ update_script() {
 
 install_mtp() {
     echo -e "${Yellow}请选择版本：${Nc}"
-    echo -e "1) Go 版      (9seconds - 推荐：省资源，高性能)"
-    echo -e "2) Python 版  (alexbers - 兼容：配置模式)"
+    echo -e "1) Go 版      (9seconds - 推荐)"
+    echo -e "2) Python 版  (alexbers - 兼容)"
     read -p "选择 [1-2]: " core_choice
     [[ "$core_choice" == "2" ]] && install_py_version || install_go_version
 }
@@ -97,17 +96,12 @@ EOF
 install_py_version() {
     echo -e "${Blue}正在配置环境...${Nc}"
     
-    # 彻底封杀所有交互弹窗
+    # 这里的关键是只用最标准的环境变量，不搞多余的预设
     export DEBIAN_FRONTEND=noninteractive
     
-    # 【核心操作】针对 Debian 13，如果装了 needrestart 这个逼玩意，直接给它卸载了或者屏蔽，不然它死活要回车
     apt-get update
-    apt-get purge -y needrestart >/dev/null 2>&1
-    
-    # 静默安装依赖
-    apt-get install -y -o Dpkg::Options::="--force-confdef" \
-                   -o Dpkg::Options::="--force-confold" \
-                   python3-dev python3-pip git xxd python3-cryptography debconf-utils
+    # 回归最原始的安装指令，去掉可能导致死锁的复杂参数
+    apt-get install -y python3-dev python3-pip git xxd python3-cryptography
 
     rm -rf "$PY_DIR"
     git clone https://github.com/alexbers/mtprotoproxy.git "$PY_DIR"
@@ -185,23 +179,23 @@ menu() {
     echo -e "----------------------------------"
     if systemctl is-active --quiet mtg; then
         source "${CONFIG_DIR}/config" 2>/dev/null
-        echo -e "服务状态: ${Green}● 运行中 (${CORE:-未知}版)${Nc}"
+        echo -e "服务状态: ${Green}● 运行中 (${CORE:-版})${Nc}"
     elif [[ ! -f "$SERVICE_FILE" ]]; then
         echo -e "服务状态: ${Yellow}○ 未安装${Nc}"
     else
         echo -e "服务状态: ${Red}○ 已停止${Nc}"
     fi
     echo -e "----------------------------------"
-    echo -e "1. 安装 / 重置"
-    echo -e "2. 修改 端口/域名"
-    echo -e "3. 查看 链接信息"
-    echo -e "4. 更新 脚本"
-    echo -e "5. 重启 服务"
-    echo -e "6. 停止 服务"
-    echo -e "7. 卸载"
-    echo -e "0. 退出"
+    echo -e "1. 安 装  / 重 置"
+    echo -e "2. 修 改 配 置"
+    echo -e "3. 查 看 信 息"
+    echo -e "4. 更 新 脚 本"
+    echo -e "5. 重 启 服 务"
+    echo -e "6. 停 止 服 务"
+    echo -e "7. 卸 载 程 序"
+    echo -e "0. 退 出"
     echo -e "----------------------------------"
-    read -p "请选择 [0-7]: " choice
+    read -p "选 择  [0-7]: " choice
     case "$choice" in
         1) install_mtp ;;
         2) [[ ! -f "${CONFIG_DIR}/config" ]] && echo -e "${Red}未安装！${Nc}" || install_mtp ;;
