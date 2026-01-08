@@ -1,167 +1,213 @@
 #!/usr/bin/env bash
-# MTProxy 管理脚本
-# 修复点：
-# 1. set -e 下 check_root / check_init_system 误触发
-# 2. apt 非交互，避免 dpkg-preconfigure 卡死
-# 3. systemctl enable --now mtg
+#=========================================================
+#   System Required: CentOS 7+ / Debian 8+ / Ubuntu 16+
+#   Description: MTProxy (Go & Python) One-click Installer
+#=========================================================
 
-set -Eeuo pipefail
+Red="\033[31m"
+Green="\033[32m"
+Yellow="\033[33m"
+Blue="\033[34m"
+Nc="\033[0m"
 
-Red='\033[0;31m'
-Green='\033[0;32m'
-Yellow='\033[0;33m'
-Nc='\033[0m'
+# 取消严格模式
+set +u
 
-WORKDIR="/opt/mtprotoproxy"
-SERVICE_NAME="mtg"
-SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+BIN_PATH="/usr/local/bin/mtg"
+PY_DIR="/opt/mtprotoproxy"
+MTP_CMD="/usr/local/bin/mtp"
+CONFIG_DIR="/etc/mtg"
+SCRIPT_URL="https://raw.githubusercontent.com/weaponchiang/MTProxy/main/mtp.sh"
 
-check_root() {
-  if [[ "$(id -u)" != "0" ]]; then
-    echo -e "${Red}错误: 请以 root 运行！${Nc}"
-    exit 1
-  fi
+check_root() { [[ "$(id -u)" != "0" ]] && echo -e "${Red}错误: 请以 root 运行！${Nc}" && exit 1; }
+check_init_system() { [[ ! -f /usr/bin/systemctl ]] && echo -e "${Red}错误: 仅支持 Systemd 系统。${Nc}" && exit 1; }
+
+# --- 功能函数 ---
+open_port() {
+    local PORT=$1
+    if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
+        firewall-cmd --zone=public --add-port=${PORT}/tcp --permanent && firewall-cmd --reload
+    fi
+    if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+        ufw allow ${PORT}/tcp
+    fi
+    iptables -I INPUT -p tcp --dport ${PORT} -j ACCEPT 2>/dev/null
 }
 
-check_init_system() {
-  if [[ ! -x /usr/bin/systemctl ]]; then
-    echo -e "${Red}错误: 仅支持 systemd 系统。${Nc}"
-    exit 1
-  fi
+close_port() {
+    local PORT=$1
+    [[ -z "$PORT" ]] && return
+    if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
+        firewall-cmd --zone=public --remove-port=${PORT}/tcp --permanent && firewall-cmd --reload
+    fi
+    [[ -x "$(command -v ufw)" ]] && ufw delete allow ${PORT}/tcp >/dev/null 2>&1
+    iptables -D INPUT -p tcp --dport ${PORT} -j ACCEPT 2>/dev/null
 }
 
-init_env() {
-  export DEBIAN_FRONTEND=noninteractive
-  export NEEDRESTART_MODE=a
-  export UCF_FORCE_CONFFNEW=1
-
-  dpkg --configure -a >/dev/null 2>&1 || true
-
-  apt-get update -y
-  apt-get install -y \
-    ca-certificates curl git xxd \
-    python3 python3-pip python3-venv python3-dev \
-    python3-cryptography build-essential
+update_script() {
+    echo -e "${Blue}正在从远程更新脚本...${Nc}"
+    TMP_FILE=$(mktemp)
+    if wget -qO "$TMP_FILE" "$SCRIPT_URL"; then
+        mv "$TMP_FILE" "$MTP_CMD" && chmod +x "$MTP_CMD"
+        cp "$MTP_CMD" "$0" 2>/dev/null
+        echo -e "${Green}管理脚本更新成功！请重新运行。${Nc}"
+        exit 0
+    else
+        echo -e "${Red}更新失败，请检查网络。${Nc}"
+    fi
 }
 
-install_python_mtproxy() {
-  echo -e "${Green}[INFO] 安装 Python 版 MTProxy${Nc}"
+# --- 核心安装逻辑 ---
+install_mtp() {
+    echo -e "${Yellow}请选择版本：${Nc}"
+    echo -e "1) Go 版     (9seconds - 推荐)"
+    echo -e "2) Python 版 (alexbers - 兼容)"
+    read -p "选择 [1-2]: " core_choice
+    [[ "$core_choice" == "2" ]] && install_py_version || install_go_version
+}
 
-  init_env
+install_go_version() {
+    ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+    VERSION=$(curl -s https://api.github.com/repos/9seconds/mtg/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    VERSION=${VERSION:-"v2.1.7"}
+    echo -e "${Blue}正在下载 Go 核心...${Nc}"
+    wget -qO- "https://github.com/9seconds/mtg/releases/download/${VERSION}/mtg-${VERSION#v}-linux-${ARCH}.tar.gz" | tar xz -C /tmp
+    mv /tmp/mtg-*/mtg "$BIN_PATH" && chmod +x "$BIN_PATH"
+    
+    mkdir -p "$CONFIG_DIR"
+    read -p "伪装域名 (默认: azure.microsoft.com): " DOMAIN
+    DOMAIN=${DOMAIN:-azure.microsoft.com}
+    SECRET=$($BIN_PATH generate-secret --hex "$DOMAIN")
+    read -p "端口 (默认随机): " PORT
+    PORT=${PORT:-$((10000 + RANDOM % 20000))}
 
-  rm -rf "$WORKDIR"
-  git clone https://github.com/alexbers/mtprotoproxy.git "$WORKDIR"
-
-  cd "$WORKDIR"
-  python3 -m venv venv
-  source venv/bin/activate
-
-  pip install --upgrade pip
-  pip install -r requirements.txt
-
-  deactivate
-
-  read -rp "伪装域名 (默认: azure.microsoft.com): " FAKE_DOMAIN
-  FAKE_DOMAIN=${FAKE_DOMAIN:-azure.microsoft.com}
-
-  read -rp "监听端口 (默认随机): " PORT
-  PORT=${PORT:-$((RANDOM % 20000 + 20000))}
-
-  SECRET=$(xxd -ps -l 16 /dev/urandom)
-
-  cat > "$SERVICE_FILE" <<EOF
+    echo -e "CORE=GO\nPORT=${PORT}\nSECRET=${SECRET}\nDOMAIN=${DOMAIN}" > "${CONFIG_DIR}/config"
+    
+    cat > /etc/systemd/system/mtg.service <<EOF
 [Unit]
 Description=MTProxy Service
 After=network.target
-
 [Service]
-Type=simple
-WorkingDirectory=$WORKDIR
-ExecStart=$WORKDIR/venv/bin/python3 $WORKDIR/mtprotoproxy.py \\
-  -p $PORT \\
-  -H $FAKE_DOMAIN \\
-  -S $SECRET \\
-  --aes-pwd $WORKDIR/proxy-secret \\
-  --allowed-clients $WORKDIR/clients \\
-  --nat-info 0.0.0.0:443
+ExecStart=${BIN_PATH} simple-run 0.0.0.0:${PORT} ${SECRET}
 Restart=always
-RestartSec=3
-
 [Install]
 WantedBy=multi-user.target
 EOF
+    finish_install "$PORT"
+}
 
-  systemctl daemon-reload
-  systemctl enable --now "$SERVICE_NAME"
+install_py_version() {
+    echo -e "${Blue}正在配置 Python 环境...${Nc}"
+    apt-get update && apt-get install -y python3-dev python3-pip git xxd python3-cryptography
+    rm -rf "$PY_DIR"
+    git clone https://github.com/alexbers/mtprotoproxy.git "$PY_DIR"
+    pip3 install pycryptodome uvloop --break-system-packages
+    
+    mkdir -p "$CONFIG_DIR"
+    read -p "伪装域名 (默认: azure.microsoft.com): " DOMAIN
+    DOMAIN=${DOMAIN:-azure.microsoft.com}
+    
+    RAW_S=$(head -c 16 /dev/urandom | xxd -ps -c 16 | tr -d '[:space:]')
+    D_HEX=$(echo -n "$DOMAIN" | xxd -p -c 256 | tr -d '[:space:]')
+    read -p "端口 (默认随机): " PORT
+    PORT=${PORT:-$((10000 + RANDOM % 20000))}
 
-  IP4=$(curl -4 -s https://api.ipify.org || true)
-  IP6=$(curl -6 -s https://api64.ipify.org || true)
+    echo -e "CORE=PY\nPORT=${PORT}\nSECRET=ee${RAW_S}${D_HEX}\nDOMAIN=${DOMAIN}\nRAW_SECRET=${RAW_S}\nDOMAIN_HEX=${D_HEX}" > "${CONFIG_DIR}/config"
 
-  echo "======= MTProxy 信息 ======="
-  echo "端口 : $PORT"
-  echo "域名 : $FAKE_DOMAIN"
-  echo "密钥 : $SECRET"
-  [[ -n "$IP4" ]] && echo "IPv4: tg://proxy?server=$IP4&port=$PORT&secret=$SECRET"
-  [[ -n "$IP6" ]] && echo "IPv6: tg://proxy?server=[$IP6]&port=$PORT&secret=$SECRET"
-  echo "============================"
+    cat > ${PY_DIR}/config.py <<EOF
+PORT = ${PORT}
+USERS = { "tg": "${RAW_S}" }
+MODES = { "classic": False, "secure": False, "tls": True }
+TLS_DOMAIN = "${DOMAIN}"
+EOF
+
+    cat > /etc/systemd/system/mtg.service <<EOF
+[Unit]
+Description=MTProxy Service
+After=network.target
+[Service]
+WorkingDirectory=${PY_DIR}
+ExecStart=/usr/bin/python3 mtprotoproxy.py config.py
+Restart=always
+[Install]
+WantedBy=multi-user.target
+EOF
+    finish_install "$PORT"
+}
+
+finish_install() {
+    open_port "$1"
+    systemctl daemon-reload && systemctl enable mtg && systemctl restart mtg
+    wget -qO "$MTP_CMD" "$SCRIPT_URL" && chmod +x "$MTP_CMD"
+    echo -e "\n${Green}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${Nc}"
+    echo -e "${Green}   安装成功！代理服务已在后台稳定运行。          ${Nc}"
+    echo -e "${Yellow}   >>> 管理快捷键: ${Red}mtp${Nc}"
+    echo -e "${Green}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${Nc}\n"
+    show_info
 }
 
 show_info() {
-  systemctl status "$SERVICE_NAME" --no-pager || true
+    [[ ! -f "${CONFIG_DIR}/config" ]] && return
+    source "${CONFIG_DIR}/config"
+    echo -e "${Blue}正在探测外网地址 (支持 IPv6)...${Nc}"
+    IP4=$(curl -s4 --connect-timeout 5 ip.sb || curl -s4 ipinfo.io/ip)
+    IP6=$(curl -s6 --connect-timeout 5 ip.sb || curl -s6 icanhazip.com)
+    
+    echo -e "\n${Green}======= MTProxy 链接信息 (${CORE}版) =======${Nc}"
+    echo -e "代理端口: ${Yellow}${PORT}${Nc} | 伪装域名: ${Blue}${DOMAIN}${Nc}"
+    echo -e "代理密钥: ${Yellow}${SECRET}${Nc}"
+    [[ -n "$IP4" ]] && echo -e "IPv4 链接: ${Green}tg://proxy?server=${IP4}&port=${PORT}&secret=${SECRET}${Nc}"
+    [[ -n "$IP6" ]] && echo -e "IPv6 链接: ${Green}tg://proxy?server=[${IP6}]&port=${PORT}&secret=${SECRET}${Nc}"
+    echo -e "========================================\n"
 }
 
-restart_service() {
-  systemctl restart "$SERVICE_NAME"
-}
-
-stop_service() {
-  systemctl stop "$SERVICE_NAME"
-}
-
-uninstall_all() {
-  systemctl disable --now "$SERVICE_NAME" 2>/dev/null || true
-  rm -f "$SERVICE_FILE"
-  rm -rf "$WORKDIR"
-  systemctl daemon-reload
-  echo -e "${Green}已卸载 MTProxy${Nc}"
-}
+# --- 菜单界面 ---
 
 menu() {
-  clear
-  echo "MTProxy 管理脚本"
-  echo "----------------------------------"
-  if systemctl is-active --quiet "$SERVICE_NAME"; then
-    echo -e "服务状态 : ${Green}运行中${Nc}"
-  else
-    echo -e "服务状态 : ○ 未安装/未运行"
-  fi
-  echo "----------------------------------"
-  echo "1. 安装 Python 版"
-  echo "2. 查看信息"
-  echo "3. 重启服务"
-  echo "4. 停止服务"
-  echo "5. 卸载"
-  echo "0. 退出"
-  echo "----------------------------------"
-  read -rp "选择 [0-5]: " num
-  case "$num" in
-    1) install_python_mtproxy ;;
-    2) show_info ;;
-    3) restart_service ;;
-    4) stop_service ;;
-    5) uninstall_all ;;
-    0) exit 0 ;;
-    *) echo "无效选择" ;;
-  esac
+    clear
+    echo -e "${Green}MTProxy (Go/Python) 多版本脚本${Nc}"
+    echo -e "----------------------------------"
+    
+    if systemctl is-active --quiet mtg; then
+        CURRENT_CORE="未知"
+        [[ -f "${CONFIG_DIR}/config" ]] && source "${CONFIG_DIR}/config" && CURRENT_CORE=$CORE
+        echo -e "服务状态: ${Green}● 运行中 (${CURRENT_CORE}版)${Nc}"
+    else
+        echo -e "服务状态: ${Red}○ 已停止${Nc}"
+    fi
+    
+    echo -e "----------------------------------"
+    echo -e "1. 安装 / 重置"
+    echo -e "2. 修改 端口/域名"
+    echo -e "3. 查看 链接信息"
+    echo -e "4. 更新 脚本"
+    echo -e "5. 重启 服务"
+    echo -e "6. 停止 服务"
+    echo -e "7. 卸载"
+    echo -e "0. 退出"
+    echo -e "----------------------------------"
+    read -p "请选择 [0-7]: " choice
+    case "$choice" in
+        1) install_mtp ;;
+        2) 
+            if [ ! -f "${CONFIG_DIR}/config" ]; then echo -e "${Red}未安装！${Nc}"; sleep 1; menu; fi
+            source "${CONFIG_DIR}/config"
+            close_port "$PORT"
+            install_mtp ;;
+        3) show_info ;;
+        4) update_script ;;
+        5) systemctl restart mtg; echo -e "${Green}服务已重启${Nc}" ;;
+        6) systemctl stop mtg; echo -e "${Yellow}服务已停止${Nc}" ;;
+        7) 
+            [[ -f "${CONFIG_DIR}/config" ]] && source "${CONFIG_DIR}/config" && close_port "$PORT"
+            systemctl stop mtg 2>/dev/null; systemctl disable mtg 2>/dev/null
+            rm -f /etc/systemd/system/mtg.service
+            rm -rf "$CONFIG_DIR" "$BIN_PATH" "$PY_DIR" "$MTP_CMD"
+            echo -e "${Green}已彻底卸载。${Nc}" ;;
+        *) exit 0 ;;
+    esac
 }
 
-main() {
-  check_root
-  check_init_system
-  while true; do
-    menu
-    read -rp "按回车继续..." _
-  done
-}
-
-main
+check_root
+check_init_system
+menu
