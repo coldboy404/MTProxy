@@ -73,7 +73,7 @@ install_go_version() {
     echo -e "${Blue}正在下载 Go 核心...${Nc}"
     wget -qO- "https://github.com/9seconds/mtg/releases/download/${VERSION}/mtg-${VERSION#v}-linux-${ARCH}.tar.gz" | tar xz -C /tmp
     mv /tmp/mtg-*/mtg "$BIN_PATH" && chmod +x "$BIN_PATH"
-    
+
     mkdir -p "$CONFIG_DIR"
     read -p "伪装域名 (默认: azure.microsoft.com): " DOMAIN
     DOMAIN=${DOMAIN:-azure.microsoft.com}
@@ -82,7 +82,7 @@ install_go_version() {
     PORT=${PORT:-$((10000 + RANDOM % 20000))}
 
     echo -e "CORE=GO\nPORT=${PORT}\nSECRET=${SECRET}\nDOMAIN=${DOMAIN}" > "${CONFIG_DIR}/config"
-    
+
     cat > /etc/systemd/system/mtg.service <<EOF
 [Unit]
 Description=MTProxy Service
@@ -98,15 +98,17 @@ EOF
 
 install_py_version() {
     echo -e "${Blue}正在配置 Python 环境...${Nc}"
+    echo -e "${Yellow}>>> 提示：如果下载进度卡在 'Fetched ...' 不动，请按 1-2 次回车键继续！ <<<${Nc}"
+    
     apt-get update && apt-get install -y python3-dev python3-pip git xxd python3-cryptography
     rm -rf "$PY_DIR"
     git clone https://github.com/alexbers/mtprotoproxy.git "$PY_DIR"
     pip3 install pycryptodome uvloop --break-system-packages
-    
+
     mkdir -p "$CONFIG_DIR"
     read -p "伪装域名 (默认: azure.microsoft.com): " DOMAIN
     DOMAIN=${DOMAIN:-azure.microsoft.com}
-    
+
     RAW_S=$(head -c 16 /dev/urandom | xxd -ps -c 16 | tr -d '[:space:]')
     D_HEX=$(echo -n "$DOMAIN" | xxd -p -c 256 | tr -d '[:space:]')
     read -p "端口 (默认随机): " PORT
@@ -152,7 +154,7 @@ show_info() {
     echo -e "${Blue}正在探测外网地址 (支持 IPv6)...${Nc}"
     IP4=$(curl -s4 --connect-timeout 5 ip.sb || curl -s4 ipinfo.io/ip)
     IP6=$(curl -s6 --connect-timeout 5 ip.sb || curl -s6 icanhazip.com)
-    
+
     echo -e "\n${Green}======= MTProxy 链接信息 (${CORE}版) =======${Nc}"
     echo -e "代理端口: ${Yellow}${PORT}${Nc} | 伪装域名: ${Blue}${DOMAIN}${Nc}"
     echo -e "代理密钥: ${Yellow}${SECRET}${Nc}"
@@ -167,15 +169,17 @@ menu() {
     clear
     echo -e "${Green}MTProxy (Go/Python) 多版本脚本${Nc}"
     echo -e "----------------------------------"
-    
+
     if systemctl is-active --quiet mtg; then
         CURRENT_CORE="未知"
         [[ -f "${CONFIG_DIR}/config" ]] && source "${CONFIG_DIR}/config" && CURRENT_CORE=$CORE
         echo -e "服务状态: ${Green}● 运行中 (${CURRENT_CORE}版)${Nc}"
+    elif [ -f "/etc/systemd/system/mtg.service" ]; then
+        echo -e "服务状态: ${Yellow}○ 已安装 (已停止)${Nc}"
     else
-        echo -e "服务状态: ${Red}○ 已停止${Nc}"
+        echo -e "服务状态: ${Red}○ 未安装${Nc}"
     fi
-    
+
     echo -e "----------------------------------"
     echo -e "1. 安装 / 重置"
     echo -e "2. 修改 端口/域名"
