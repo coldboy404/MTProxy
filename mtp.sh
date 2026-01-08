@@ -58,8 +58,8 @@ update_script() {
 
 install_mtp() {
     echo -e "${Yellow}请选择版本：${Nc}"
-    echo -e "1) Go 版      (9seconds - 推荐)"
-    echo -e "2) Python 版  (alexbers - 兼容)"
+    echo -e "1) Go 版      (9seconds - 推荐：省资源，高性能)"
+    echo -e "2) Python 版  (alexbers - 兼容：配置模式)"
     read -p "选择 [1-2]: " core_choice
     [[ "$core_choice" == "2" ]] && install_py_version || install_go_version
 }
@@ -96,12 +96,21 @@ EOF
 install_py_version() {
     echo -e "${Blue}正在配置环境...${Nc}"
     
-    # 这里的关键是只用最标准的环境变量，不搞多余的预设
+    # 1. 设置免交互变量
     export DEBIAN_FRONTEND=noninteractive
     
+    # 2. 先更新源
     apt-get update
-    # 回归最原始的安装指令，去掉可能导致死锁的复杂参数
-    apt-get install -y python3-dev python3-pip git xxd python3-cryptography
+    
+    # 3. 【绝对核心修复】先卸载 needrestart。这就是导致卡死的罪魁祸首。
+    # 加 || true 防止因为没装这个包报错退出
+    apt-get purge -y needrestart >/dev/null 2>&1 || true
+    
+    # 4. 现在再安装依赖，此时没有拦截进程，apt 不会卡住
+    apt-get install -y \
+        -o Dpkg::Options::="--force-confdef" \
+        -o Dpkg::Options::="--force-confold" \
+        python3-dev python3-pip git xxd python3-cryptography
 
     rm -rf "$PY_DIR"
     git clone https://github.com/alexbers/mtprotoproxy.git "$PY_DIR"
@@ -175,24 +184,24 @@ uninstall_all() {
 menu() {
     systemctl daemon-reload
     clear
-    echo -e "${Green}MTProxy (Go/Python) 管理脚本${Nc}"
+    echo -e "${Green}MTProxy (Go/Python) 管 理 脚 本${Nc}"
     echo -e "----------------------------------"
     if systemctl is-active --quiet mtg; then
         source "${CONFIG_DIR}/config" 2>/dev/null
-        echo -e "服务状态: ${Green}● 运行中 (${CORE:-版})${Nc}"
+        echo -e "服 务 状 态 : ${Green}● 运 行 中 (${CORE:-版})${Nc}"
     elif [[ ! -f "$SERVICE_FILE" ]]; then
-        echo -e "服务状态: ${Yellow}○ 未安装${Nc}"
+        echo -e "服 务 状 态 : ${Yellow}○ 未 安 装${Nc}"
     else
-        echo -e "服务状态: ${Red}○ 已停止${Nc}"
+        echo -e "服 务 状 态 : ${Red}○ 已 停 止${Nc}"
     fi
     echo -e "----------------------------------"
     echo -e "1. 安 装  / 重 置"
-    echo -e "2. 修 改 配 置"
-    echo -e "3. 查 看 信 息"
-    echo -e "4. 更 新 脚 本"
-    echo -e "5. 重 启 服 务"
-    echo -e "6. 停 止 服 务"
-    echo -e "7. 卸 载 程 序"
+    echo -e "2. 修 改  端 口 /域 名"
+    echo -e "3. 查 看  链 接 信 息"
+    echo -e "4. 更 新  脚 本"
+    echo -e "5. 重 启  服 务"
+    echo -e "6. 停 止  服 务"
+    echo -e "7. 卸 载"
     echo -e "0. 退 出"
     echo -e "----------------------------------"
     read -p "选 择  [0-7]: " choice
