@@ -23,7 +23,7 @@
 在你的服务器终端（SSH）中执行以下命令即可：
 
 ```markdown
-bash <(curl -LfsS https://raw.githubusercontent.com/weaponchiang/MTProxy/main/mtp.sh)
+bash <(curl -LfsS https://raw.githubusercontent.com/coldboy404/MTProxy/main/mtp.sh)
 ```
 ### 🚀 快捷管理
 
