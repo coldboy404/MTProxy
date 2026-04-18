@@ -17,7 +17,8 @@ BIN_PATH="/usr/local/bin/mtg"
 PY_DIR="/opt/mtprotoproxy"
 MTP_CMD="/usr/local/bin/mtp"
 CONFIG_DIR="/etc/mtg"
-SCRIPT_URL="https://raw.githubusercontent.com/weaponchiang/MTProxy/main/mtp.sh"
+SCRIPT_VERSION="2026.04.18-2"
+SCRIPT_URL="https://raw.githubusercontent.com/coldboy404/MTProxy/main/mtp.sh"
 
 check_root() { [[ "$(id -u)" != "0" ]] && echo -e "${Red}错误: 请以 root 运行！${Nc}" && exit 1; }
 check_init_system() { [[ ! -f /usr/bin/systemctl ]] && echo -e "${Red}错误: 仅支持 Systemd 系统。${Nc}" && exit 1; }
@@ -59,14 +60,16 @@ update_script() {
 
 # --- 核心安装逻辑 ---
 install_mtp() {
+    local OLD_PORT="$1"
     echo -e "${Yellow}请选择版本：${Nc}"
     echo -e "1) Go 版     (9seconds - 推荐)"
     echo -e "2) Python 版 (alexbers - 兼容)"
     read -p "选择 [1-2]: " core_choice
-    [[ "$core_choice" == "2" ]] && install_py_version || install_go_version
+    [[ "$core_choice" == "2" ]] && install_py_version "$OLD_PORT" || install_go_version "$OLD_PORT"
 }
 
 install_go_version() {
+    local OLD_PORT="$1"
     ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
     VERSION=$(curl -s https://api.github.com/repos/9seconds/mtg/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
     VERSION=${VERSION:-"v2.1.7"}
@@ -83,6 +86,8 @@ install_go_version() {
 
     echo -e "CORE=GO\nPORT=${PORT}\nSECRET=${SECRET}\nDOMAIN=${DOMAIN}" > "${CONFIG_DIR}/config"
 
+    rm -rf "$PY_DIR"
+
     cat > /etc/systemd/system/mtg.service <<EOF
 [Unit]
 Description=MTProxy Service
@@ -93,13 +98,19 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
-    finish_install "$PORT"
+    finish_install "$PORT" "$OLD_PORT"
 }
 
 install_py_version() {
+    local OLD_PORT="$1"
     echo -e "${Blue}正在配置 Python 环境...${Nc}"
     echo -e "${Yellow}>>> 提示：如果下载进度卡在 'Fetched ...' 不动，请按 1-2 次回车键继续！ <<<${Nc}"
-    
+
+    if ! command -v apt-get >/dev/null 2>&1; then
+        echo -e "${Red}Python 版当前仅支持 Debian/Ubuntu (apt-get) 系统。${Nc}"
+        exit 1
+    fi
+
     apt-get update && apt-get install -y python3-dev python3-pip git xxd python3-cryptography
     rm -rf "$PY_DIR"
     git clone https://github.com/alexbers/mtprotoproxy.git "$PY_DIR"
@@ -123,6 +134,8 @@ MODES = { "classic": False, "secure": False, "tls": True }
 TLS_DOMAIN = "${DOMAIN}"
 EOF
 
+    rm -f "$BIN_PATH"
+
     cat > /etc/systemd/system/mtg.service <<EOF
 [Unit]
 Description=MTProxy Service
@@ -134,13 +147,47 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
-    finish_install "$PORT"
+    finish_install "$PORT" "$OLD_PORT"
 }
 
 finish_install() {
-    open_port "$1"
-    systemctl daemon-reload && systemctl enable mtg && systemctl restart mtg
-    wget -qO "$MTP_CMD" "$SCRIPT_URL" && chmod +x "$MTP_CMD"
+    local NEW_PORT="$1"
+    local OLD_PORT="$2"
+
+    open_port "$NEW_PORT"
+
+    if ! systemctl daemon-reload; then
+        echo -e "${Red}安装失败：systemd 重载失败。${Nc}"
+        exit 1
+    fi
+
+    if ! systemctl enable mtg >/dev/null 2>&1; then
+        echo -e "${Red}安装失败：无法启用 mtg 服务。${Nc}"
+        exit 1
+    fi
+
+    if ! systemctl restart mtg; then
+        echo -e "${Red}安装失败：mtg 服务启动失败。${Nc}"
+        systemctl --no-pager --full status mtg || true
+        exit 1
+    fi
+
+    if ! systemctl is-active --quiet mtg; then
+        echo -e "${Red}安装失败：mtg 服务未处于运行状态。${Nc}"
+        systemctl --no-pager --full status mtg || true
+        exit 1
+    fi
+
+    if [[ -n "$OLD_PORT" && "$OLD_PORT" != "$NEW_PORT" ]]; then
+        close_port "$OLD_PORT"
+    fi
+
+    if wget -qO "$MTP_CMD" "$SCRIPT_URL"; then
+        chmod +x "$MTP_CMD"
+    else
+        echo -e "${Yellow}警告：管理脚本更新失败，但代理服务已安装成功。${Nc}"
+    fi
+
     echo -e "\n${Green}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${Nc}"
     echo -e "${Green}   安装成功！代理服务已在后台稳定运行。          ${Nc}"
     echo -e "${Yellow}   >>> 管理快捷键: ${Red}mtp${Nc}"
@@ -188,6 +235,7 @@ show_info() {
 menu() {
     clear
     echo -e "${Green}MTProxy (Go/Python) 多版本脚本${Nc}"
+    echo -e "脚本版本: ${Yellow}${SCRIPT_VERSION}${Nc}"
     echo -e "----------------------------------"
 
     if systemctl is-active --quiet mtg; then
@@ -216,16 +264,30 @@ menu() {
         2) 
             if [ ! -f "${CONFIG_DIR}/config" ]; then echo -e "${Red}未安装！${Nc}"; sleep 1; menu; fi
             source "${CONFIG_DIR}/config"
-            close_port "$PORT"
-            install_mtp ;;
+            OLD_PORT="$PORT"
+            install_mtp "$OLD_PORT" ;;
         3) show_info ;;
         4) update_script ;;
-        5) systemctl restart mtg; echo -e "${Green}服务已重启${Nc}" ;;
-        6) systemctl stop mtg; echo -e "${Yellow}服务已停止${Nc}" ;;
+        5) 
+            if systemctl restart mtg && systemctl is-active --quiet mtg; then
+                echo -e "${Green}服务已重启${Nc}"
+            else
+                echo -e "${Red}服务重启失败${Nc}"
+                systemctl --no-pager --full status mtg || true
+            fi ;;
+        6) 
+            if systemctl stop mtg; then
+                echo -e "${Yellow}服务已停止${Nc}"
+            else
+                echo -e "${Red}服务停止失败${Nc}"
+                systemctl --no-pager --full status mtg || true
+            fi ;;
         7) 
             [[ -f "${CONFIG_DIR}/config" ]] && source "${CONFIG_DIR}/config" && close_port "$PORT"
             systemctl stop mtg 2>/dev/null; systemctl disable mtg 2>/dev/null
             rm -f /etc/systemd/system/mtg.service
+            systemctl daemon-reload 2>/dev/null || true
+            systemctl reset-failed 2>/dev/null || true
             rm -rf "$CONFIG_DIR" "$BIN_PATH" "$PY_DIR" "$MTP_CMD"
             echo -e "${Green}已彻底卸载。${Nc}" ;;
         *) exit 0 ;;
