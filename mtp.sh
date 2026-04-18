@@ -156,17 +156,21 @@ show_info() {
         ip -6 addr show scope global 2>/dev/null | grep -q 'inet6'
     }
 
-    echo -e "${Blue}正在探测外网地址...${Nc}"
+    echo -e "${Blue}正在获取公网地址...${Nc}"
 
-    IP4=$(curl -fsS4 --connect-timeout 3 --max-time 5 ip.sb \
-        || curl -fsS4 --connect-timeout 3 --max-time 5 ipinfo.io/ip \
+    IP4=$(curl -fs4 --connect-timeout 3 --max-time 5 ip.sb 2>/dev/null \
+        || curl -fs4 --connect-timeout 3 --max-time 5 ipinfo.io/ip 2>/dev/null \
         || true)
 
     IP6=""
+    IPv6_STATUS=""
     if has_global_ipv6; then
-        IP6=$(curl -fsS6 --connect-timeout 3 --max-time 5 ip.sb \
-            || curl -fsS6 --connect-timeout 3 --max-time 5 icanhazip.com \
+        IP6=$(curl -fs6 --connect-timeout 3 --max-time 5 ip.sb 2>/dev/null \
+            || curl -fs6 --connect-timeout 3 --max-time 5 icanhazip.com 2>/dev/null \
             || true)
+        [[ -z "$IP6" ]] && IPv6_STATUS="本机未探测到可用公网 IPv6 地址"
+    else
+        IPv6_STATUS="本机无公网 IPv6 地址"
     fi
 
     echo -e "\n${Green}======= MTProxy 链接信息 (${CORE}版) =======${Nc}"
@@ -174,6 +178,7 @@ show_info() {
     echo -e "代理密钥: ${Yellow}${SECRET}${Nc}"
     [[ -n "$IP4" ]] && echo -e "IPv4 链接: ${Green}tg://proxy?server=${IP4}&port=${PORT}&secret=${SECRET}${Nc}"
     [[ -n "$IP6" ]] && echo -e "IPv6 链接: ${Green}tg://proxy?server=[${IP6}]&port=${PORT}&secret=${SECRET}${Nc}"
+    [[ -n "$IPv6_STATUS" ]] && echo -e "IPv6 状态: ${Yellow}${IPv6_STATUS}${Nc}"
     [[ -z "$IP4" && -z "$IP6" ]] && echo -e "${Yellow}提示：未能探测到公网 IP，可稍后手动查看。${Nc}"
     echo -e "========================================\n"
 }
