@@ -151,15 +151,30 @@ finish_install() {
 show_info() {
     [[ ! -f "${CONFIG_DIR}/config" ]] && return
     source "${CONFIG_DIR}/config"
-    echo -e "${Blue}正在探测外网地址 (支持 IPv6)...${Nc}"
-    IP4=$(curl -s4 --connect-timeout 5 ip.sb || curl -s4 ipinfo.io/ip)
-    IP6=$(curl -s6 --connect-timeout 5 ip.sb || curl -s6 icanhazip.com)
+
+    has_global_ipv6() {
+        ip -6 addr show scope global 2>/dev/null | grep -q 'inet6'
+    }
+
+    echo -e "${Blue}正在探测外网地址...${Nc}"
+
+    IP4=$(curl -fsS4 --connect-timeout 3 --max-time 5 ip.sb \
+        || curl -fsS4 --connect-timeout 3 --max-time 5 ipinfo.io/ip \
+        || true)
+
+    IP6=""
+    if has_global_ipv6; then
+        IP6=$(curl -fsS6 --connect-timeout 3 --max-time 5 ip.sb \
+            || curl -fsS6 --connect-timeout 3 --max-time 5 icanhazip.com \
+            || true)
+    fi
 
     echo -e "\n${Green}======= MTProxy 链接信息 (${CORE}版) =======${Nc}"
     echo -e "代理端口: ${Yellow}${PORT}${Nc} | 伪装域名: ${Blue}${DOMAIN}${Nc}"
     echo -e "代理密钥: ${Yellow}${SECRET}${Nc}"
     [[ -n "$IP4" ]] && echo -e "IPv4 链接: ${Green}tg://proxy?server=${IP4}&port=${PORT}&secret=${SECRET}${Nc}"
     [[ -n "$IP6" ]] && echo -e "IPv6 链接: ${Green}tg://proxy?server=[${IP6}]&port=${PORT}&secret=${SECRET}${Nc}"
+    [[ -z "$IP4" && -z "$IP6" ]] && echo -e "${Yellow}提示：未能探测到公网 IP，可稍后手动查看。${Nc}"
     echo -e "========================================\n"
 }
 
