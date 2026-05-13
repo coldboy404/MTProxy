@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #=========================================================
-#   System Required: CentOS 7+ / Debian 8+ / Ubuntu 16+
+#   System Required: CentOS 7+ / Debian 8+ / Ubuntu 16+ / Alpine
 #   Description: MTProxy (Go & Python) One-click Installer
 #=========================================================
 
@@ -17,16 +17,169 @@ BIN_PATH="/usr/local/bin/mtg"
 PY_DIR="/opt/mtprotoproxy"
 MTP_CMD="/usr/local/bin/mtp"
 CONFIG_DIR="/etc/mtg"
-SCRIPT_VERSION="2026.04.18-2"
+SERVICE_NAME="mtg"
+INIT_SYSTEM=""
+SCRIPT_VERSION="2026.05.13-1"
 SCRIPT_URL="https://raw.githubusercontent.com/coldboy404/MTProxy/main/mtp.sh"
 
 check_root() { [[ "$(id -u)" != "0" ]] && echo -e "${Red}错误: 请以 root 运行！${Nc}" && exit 1; }
-check_init_system() { [[ ! -f /usr/bin/systemctl ]] && echo -e "${Red}错误: 仅支持 Systemd 系统。${Nc}" && exit 1; }
+
+detect_init_system() {
+    if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system || -d /etc/systemd/system ]]; then
+        INIT_SYSTEM="systemd"
+    elif command -v rc-service >/dev/null 2>&1 && command -v rc-update >/dev/null 2>&1; then
+        INIT_SYSTEM="openrc"
+    else
+        echo -e "${Red}错误: 仅支持 Systemd 或 OpenRC 系统。${Nc}"
+        exit 1
+    fi
+}
+
+is_alpine() {
+    [[ -f /etc/alpine-release ]] || grep -qi '^ID=alpine' /etc/os-release 2>/dev/null
+}
+
+install_base_deps() {
+    if is_alpine && command -v apk >/dev/null 2>&1; then
+        apk add --no-cache bash curl wget tar gzip iproute2 iptables ca-certificates >/dev/null
+    elif command -v apt-get >/dev/null 2>&1; then
+        apt-get update && apt-get install -y curl wget tar gzip iproute2 iptables ca-certificates
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y curl wget tar gzip iproute iptables ca-certificates
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y curl wget tar gzip iproute iptables ca-certificates
+    fi
+}
+
+# --- 服务管理兼容层 ---
+write_service_file() {
+    local CORE="$1"
+    local PORT="$2"
+    local SECRET="$3"
+
+    if [[ "$INIT_SYSTEM" == "systemd" ]]; then
+        if [[ "$CORE" == "GO" ]]; then
+            cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
+[Unit]
+Description=MTProxy Service
+After=network.target
+[Service]
+ExecStart=${BIN_PATH} simple-run 0.0.0.0:${PORT} ${SECRET}
+Restart=always
+[Install]
+WantedBy=multi-user.target
+EOF
+        else
+            cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
+[Unit]
+Description=MTProxy Service
+After=network.target
+[Service]
+WorkingDirectory=${PY_DIR}
+ExecStart=/usr/bin/python3 mtprotoproxy.py config.py
+Restart=always
+[Install]
+WantedBy=multi-user.target
+EOF
+        fi
+    else
+        cat > /etc/init.d/${SERVICE_NAME} <<EOF
+#!/sbin/openrc-run
+name="MTProxy Service"
+description="MTProxy Service"
+supervisor="supervise-daemon"
+respawn_delay=3
+respawn_max=0
+command_background="yes"
+EOF
+        if [[ "$CORE" == "GO" ]]; then
+            cat >> /etc/init.d/${SERVICE_NAME} <<EOF
+command="${BIN_PATH}"
+command_args="simple-run 0.0.0.0:${PORT} ${SECRET}"
+EOF
+        else
+            cat >> /etc/init.d/${SERVICE_NAME} <<EOF
+directory="${PY_DIR}"
+command="/usr/bin/python3"
+command_args="mtprotoproxy.py config.py"
+EOF
+        fi
+        chmod +x /etc/init.d/${SERVICE_NAME}
+    fi
+}
+
+service_enable() {
+    if [[ "$INIT_SYSTEM" == "systemd" ]]; then
+        systemctl daemon-reload && systemctl enable ${SERVICE_NAME} >/dev/null 2>&1
+    else
+        rc-update add ${SERVICE_NAME} default >/dev/null 2>&1
+    fi
+}
+
+service_restart() {
+    if [[ "$INIT_SYSTEM" == "systemd" ]]; then
+        systemctl restart ${SERVICE_NAME}
+    else
+        rc-service ${SERVICE_NAME} restart
+    fi
+}
+
+service_stop() {
+    if [[ "$INIT_SYSTEM" == "systemd" ]]; then
+        systemctl stop ${SERVICE_NAME}
+    else
+        rc-service ${SERVICE_NAME} stop
+    fi
+}
+
+service_disable() {
+    if [[ "$INIT_SYSTEM" == "systemd" ]]; then
+        systemctl disable ${SERVICE_NAME} >/dev/null 2>&1
+    else
+        rc-update del ${SERVICE_NAME} default >/dev/null 2>&1
+    fi
+}
+
+service_is_active() {
+    if [[ "$INIT_SYSTEM" == "systemd" ]]; then
+        systemctl is-active --quiet ${SERVICE_NAME}
+    else
+        rc-service ${SERVICE_NAME} status >/dev/null 2>&1
+    fi
+}
+
+service_status() {
+    if [[ "$INIT_SYSTEM" == "systemd" ]]; then
+        systemctl --no-pager --full status ${SERVICE_NAME} || true
+    else
+        rc-service ${SERVICE_NAME} status || true
+        tail -n 80 /var/log/${SERVICE_NAME}.log 2>/dev/null || true
+    fi
+}
+
+remove_service_file() {
+    if [[ "$INIT_SYSTEM" == "systemd" ]]; then
+        rm -f /etc/systemd/system/${SERVICE_NAME}.service
+        systemctl daemon-reload 2>/dev/null || true
+        systemctl reset-failed 2>/dev/null || true
+    else
+        rm -f /etc/init.d/${SERVICE_NAME}
+    fi
+}
+
+firewalld_active() {
+    command -v firewall-cmd >/dev/null 2>&1 || return 1
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl is-active --quiet firewalld 2>/dev/null
+    else
+        return 1
+    fi
+}
 
 # --- 功能函数 ---
 open_port() {
     local PORT=$1
-    if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
+    if firewalld_active; then
         firewall-cmd --zone=public --add-port=${PORT}/tcp --permanent && firewall-cmd --reload
     fi
     if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
@@ -38,7 +191,7 @@ open_port() {
 close_port() {
     local PORT=$1
     [[ -z "$PORT" ]] && return
-    if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
+    if firewalld_active; then
         firewall-cmd --zone=public --remove-port=${PORT}/tcp --permanent && firewall-cmd --reload
     fi
     [[ -x "$(command -v ufw)" ]] && ufw delete allow ${PORT}/tcp >/dev/null 2>&1
@@ -70,6 +223,7 @@ install_mtp() {
 
 install_go_version() {
     local OLD_PORT="$1"
+    install_base_deps
     ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
     VERSION=$(curl -s https://api.github.com/repos/9seconds/mtg/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
     VERSION=${VERSION:-"v2.1.7"}
@@ -87,18 +241,26 @@ install_go_version() {
     echo -e "CORE=GO\nPORT=${PORT}\nSECRET=${SECRET}\nDOMAIN=${DOMAIN}" > "${CONFIG_DIR}/config"
 
     rm -rf "$PY_DIR"
-
-    cat > /etc/systemd/system/mtg.service <<EOF
-[Unit]
-Description=MTProxy Service
-After=network.target
-[Service]
-ExecStart=${BIN_PATH} simple-run 0.0.0.0:${PORT} ${SECRET}
-Restart=always
-[Install]
-WantedBy=multi-user.target
-EOF
+    write_service_file "GO" "$PORT" "$SECRET"
     finish_install "$PORT" "$OLD_PORT"
+}
+
+install_py_deps() {
+    if is_alpine && command -v apk >/dev/null 2>&1; then
+        apk add --no-cache python3 python3-dev py3-pip py3-cryptography git xxd build-base linux-headers
+    elif command -v apt-get >/dev/null 2>&1; then
+        apt-get update && apt-get install -y python3-dev python3-pip git xxd python3-cryptography
+    else
+        echo -e "${Red}Python 版当前仅支持 Alpine/Debian/Ubuntu 系统。${Nc}"
+        exit 1
+    fi
+}
+
+pip_install_py_deps() {
+    if pip3 install pycryptodome uvloop --break-system-packages 2>/dev/null; then
+        return 0
+    fi
+    pip3 install pycryptodome uvloop
 }
 
 install_py_version() {
@@ -106,15 +268,11 @@ install_py_version() {
     echo -e "${Blue}正在配置 Python 环境...${Nc}"
     echo -e "${Yellow}>>> 提示：如果下载进度卡在 'Fetched ...' 不动，请按 1-2 次回车键继续！ <<<${Nc}"
 
-    if ! command -v apt-get >/dev/null 2>&1; then
-        echo -e "${Red}Python 版当前仅支持 Debian/Ubuntu (apt-get) 系统。${Nc}"
-        exit 1
-    fi
-
-    apt-get update && apt-get install -y python3-dev python3-pip git xxd python3-cryptography
+    install_base_deps
+    install_py_deps
     rm -rf "$PY_DIR"
     git clone https://github.com/alexbers/mtprotoproxy.git "$PY_DIR"
-    pip3 install pycryptodome uvloop --break-system-packages
+    pip_install_py_deps
 
     mkdir -p "$CONFIG_DIR"
     read -p "伪装域名 (默认: azure.microsoft.com): " DOMAIN
@@ -135,18 +293,7 @@ TLS_DOMAIN = "${DOMAIN}"
 EOF
 
     rm -f "$BIN_PATH"
-
-    cat > /etc/systemd/system/mtg.service <<EOF
-[Unit]
-Description=MTProxy Service
-After=network.target
-[Service]
-WorkingDirectory=${PY_DIR}
-ExecStart=/usr/bin/python3 mtprotoproxy.py config.py
-Restart=always
-[Install]
-WantedBy=multi-user.target
-EOF
+    write_service_file "PY" "$PORT" ""
     finish_install "$PORT" "$OLD_PORT"
 }
 
@@ -156,25 +303,21 @@ finish_install() {
 
     open_port "$NEW_PORT"
 
-    if ! systemctl daemon-reload; then
-        echo -e "${Red}安装失败：systemd 重载失败。${Nc}"
+    if ! service_enable; then
+        echo -e "${Red}安装失败：无法启用 ${SERVICE_NAME} 服务。${Nc}"
+        service_status
         exit 1
     fi
 
-    if ! systemctl enable mtg >/dev/null 2>&1; then
-        echo -e "${Red}安装失败：无法启用 mtg 服务。${Nc}"
+    if ! service_restart; then
+        echo -e "${Red}安装失败：${SERVICE_NAME} 服务启动失败。${Nc}"
+        service_status
         exit 1
     fi
 
-    if ! systemctl restart mtg; then
-        echo -e "${Red}安装失败：mtg 服务启动失败。${Nc}"
-        systemctl --no-pager --full status mtg || true
-        exit 1
-    fi
-
-    if ! systemctl is-active --quiet mtg; then
-        echo -e "${Red}安装失败：mtg 服务未处于运行状态。${Nc}"
-        systemctl --no-pager --full status mtg || true
+    if ! service_is_active; then
+        echo -e "${Red}安装失败：${SERVICE_NAME} 服务未处于运行状态。${Nc}"
+        service_status
         exit 1
     fi
 
@@ -236,13 +379,14 @@ menu() {
     clear
     echo -e "${Green}MTProxy (Go/Python) 多版本脚本${Nc}"
     echo -e "脚本版本: ${Yellow}${SCRIPT_VERSION}${Nc}"
+    echo -e "运行环境: ${Yellow}${INIT_SYSTEM}${Nc}"
     echo -e "----------------------------------"
 
-    if systemctl is-active --quiet mtg; then
+    if service_is_active; then
         CURRENT_CORE="未知"
         [[ -f "${CONFIG_DIR}/config" ]] && source "${CONFIG_DIR}/config" && CURRENT_CORE=$CORE
         echo -e "服务状态: ${Green}● 运行中 (${CURRENT_CORE}版)${Nc}"
-    elif [ -f "/etc/systemd/system/mtg.service" ]; then
+    elif [[ -f "/etc/systemd/system/${SERVICE_NAME}.service" || -f "/etc/init.d/${SERVICE_NAME}" ]]; then
         echo -e "服务状态: ${Yellow}○ 已安装 (已停止)${Nc}"
     else
         echo -e "服务状态: ${Red}○ 未安装${Nc}"
@@ -261,33 +405,32 @@ menu() {
     read -p "请选择 [0-7]: " choice
     case "$choice" in
         1) install_mtp ;;
-        2) 
+        2)
             if [ ! -f "${CONFIG_DIR}/config" ]; then echo -e "${Red}未安装！${Nc}"; sleep 1; menu; fi
             source "${CONFIG_DIR}/config"
             OLD_PORT="$PORT"
             install_mtp "$OLD_PORT" ;;
         3) show_info ;;
         4) update_script ;;
-        5) 
-            if systemctl restart mtg && systemctl is-active --quiet mtg; then
+        5)
+            if service_restart && service_is_active; then
                 echo -e "${Green}服务已重启${Nc}"
             else
                 echo -e "${Red}服务重启失败${Nc}"
-                systemctl --no-pager --full status mtg || true
+                service_status
             fi ;;
-        6) 
-            if systemctl stop mtg; then
+        6)
+            if service_stop; then
                 echo -e "${Yellow}服务已停止${Nc}"
             else
                 echo -e "${Red}服务停止失败${Nc}"
-                systemctl --no-pager --full status mtg || true
+                service_status
             fi ;;
-        7) 
+        7)
             [[ -f "${CONFIG_DIR}/config" ]] && source "${CONFIG_DIR}/config" && close_port "$PORT"
-            systemctl stop mtg 2>/dev/null; systemctl disable mtg 2>/dev/null
-            rm -f /etc/systemd/system/mtg.service
-            systemctl daemon-reload 2>/dev/null || true
-            systemctl reset-failed 2>/dev/null || true
+            service_stop 2>/dev/null || true
+            service_disable 2>/dev/null || true
+            remove_service_file
             rm -rf "$CONFIG_DIR" "$BIN_PATH" "$PY_DIR" "$MTP_CMD"
             echo -e "${Green}已彻底卸载。${Nc}" ;;
         *) exit 0 ;;
@@ -295,5 +438,5 @@ menu() {
 }
 
 check_root
-check_init_system
+detect_init_system
 menu
