@@ -19,12 +19,22 @@ MTP_CMD="/usr/local/bin/mtp"
 CONFIG_DIR="/etc/mtg"
 SERVICE_NAME="mtg"
 INIT_SYSTEM=""
-SCRIPT_VERSION="2026.05.13-1"
+OS_NAME=""
+SCRIPT_VERSION="2026.05.13"
 SCRIPT_URL="https://raw.githubusercontent.com/coldboy404/MTProxy/main/mtp.sh"
 
 check_root() { [[ "$(id -u)" != "0" ]] && echo -e "${Red}错误: 请以 root 运行！${Nc}" && exit 1; }
 
+detect_os_name() {
+    if [[ -f /etc/os-release ]]; then
+        OS_NAME=$(grep -E '^PRETTY_NAME=' /etc/os-release | head -1 | cut -d= -f2- | tr -d '"')
+        [[ -z "$OS_NAME" ]] && OS_NAME=$(grep -E '^NAME=' /etc/os-release | head -1 | cut -d= -f2- | tr -d '"')
+    fi
+    [[ -z "$OS_NAME" ]] && OS_NAME=$(uname -s)
+}
+
 detect_init_system() {
+    detect_os_name
     if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system || -d /etc/systemd/system ]]; then
         INIT_SYSTEM="systemd"
     elif command -v rc-service >/dev/null 2>&1 && command -v rc-update >/dev/null 2>&1; then
@@ -379,7 +389,7 @@ menu() {
     clear
     echo -e "${Green}MTProxy (Go/Python) 多版本脚本${Nc}"
     echo -e "脚本版本: ${Yellow}${SCRIPT_VERSION}${Nc}"
-    echo -e "运行环境: ${Yellow}${INIT_SYSTEM}${Nc}"
+    echo -e "运行环境: ${Yellow}${OS_NAME}${Nc}"
     echo -e "----------------------------------"
 
     if service_is_active; then
