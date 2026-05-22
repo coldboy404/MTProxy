@@ -20,7 +20,7 @@ CONFIG_DIR="/etc/mtg"
 SERVICE_NAME="mtg"
 INIT_SYSTEM=""
 OS_NAME=""
-SCRIPT_VERSION="2026.05.22.3"
+SCRIPT_VERSION="2026.05.22.4"
 SCRIPT_URL="https://raw.githubusercontent.com/coldboy404/MTProxy/main/mtp.sh"
 
 check_root() { [[ "$(id -u)" != "0" ]] && echo -e "${Red}错误: 请以 root 运行！${Nc}" && exit 1; }
@@ -257,32 +257,36 @@ install_go_version() {
 
 install_py_deps() {
     if is_alpine && command -v apk >/dev/null 2>&1; then
-        apk add --no-cache python3 python3-dev py3-pip py3-cryptography git xxd build-base linux-headers
+        apk add --no-cache python3 py3-cryptography wget xxd
     elif command -v apt-get >/dev/null 2>&1; then
-        apt-get update && apt-get install -y python3-dev python3-pip git xxd python3-cryptography
+        apt-get update && apt-get install -y python3 wget xxd python3-cryptography
     else
         echo -e "${Red}Python 版当前仅支持 Alpine/Debian/Ubuntu 系统。${Nc}"
         exit 1
     fi
 }
 
-pip_install_py_deps() {
-    if pip3 install pycryptodome uvloop --break-system-packages 2>/dev/null; then
-        return 0
+install_py_core() {
+    rm -rf "$PY_DIR"
+    mkdir -p "$PY_DIR"
+
+    if command -v git >/dev/null 2>&1; then
+        git clone https://github.com/alexbers/mtprotoproxy.git "$PY_DIR" && return 0
+        rm -rf "$PY_DIR"
+        mkdir -p "$PY_DIR"
     fi
-    pip3 install pycryptodome uvloop
+
+    wget -qO "${PY_DIR}/mtprotoproxy.py" "https://raw.githubusercontent.com/alexbers/mtprotoproxy/master/mtprotoproxy.py"
 }
 
 install_py_version() {
     local OLD_PORT="$1"
     echo -e "${Blue}正在配置 Python 环境...${Nc}"
-    echo -e "${Yellow}>>> 提示：如果下载进度卡在 'Fetched ...' 不动，请按 1-2 次回车键继续！ <<<${Nc}"
+    echo -e "${Yellow}Python 版将使用系统 Python 依赖，避免安装 git/pip/build-essential。${Nc}"
 
     install_base_deps
     install_py_deps
-    rm -rf "$PY_DIR"
-    git clone https://github.com/alexbers/mtprotoproxy.git "$PY_DIR"
-    pip_install_py_deps
+    install_py_core
 
     mkdir -p "$CONFIG_DIR"
     read -p "伪装域名 (默认: azure.microsoft.com): " DOMAIN
