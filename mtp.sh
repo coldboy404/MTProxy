@@ -20,7 +20,7 @@ CONFIG_DIR="/etc/mtg"
 SERVICE_NAME="mtg"
 INIT_SYSTEM=""
 OS_NAME=""
-SCRIPT_VERSION="2026.05.22.1"
+SCRIPT_VERSION="2026.05.22.2"
 SCRIPT_URL="https://raw.githubusercontent.com/coldboy404/MTProxy/main/mtp.sh"
 
 check_root() { [[ "$(id -u)" != "0" ]] && echo -e "${Red}错误: 请以 root 运行！${Nc}" && exit 1; }
@@ -54,17 +54,19 @@ apt_update_install() {
     local apt_opts="-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
 
     if ! apt-get update; then
-        echo -e "${Yellow}apt 更新失败，尝试修复 dpkg/依赖状态后重试...${Nc}"
-        DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true
-        DEBIAN_FRONTEND=noninteractive apt-get $apt_opts -f install -y || true
-        apt-get update || return 1
+        echo -e "${Red}apt 更新失败。请先手动修复系统软件包状态后重试：${Nc}"
+        echo "  dpkg --configure -a"
+        echo "  apt-get -f install -y"
+        return 1
     fi
 
     if ! DEBIAN_FRONTEND=noninteractive apt-get $apt_opts install -y $packages; then
-        echo -e "${Yellow}apt 安装失败，尝试执行 dpkg --configure -a 与 apt-get -f install 后重试...${Nc}"
-        DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true
-        DEBIAN_FRONTEND=noninteractive apt-get $apt_opts -f install -y || true
-        DEBIAN_FRONTEND=noninteractive apt-get $apt_opts install -y $packages || return 1
+        echo -e "${Red}apt 安装依赖失败。检测到系统软件包状态异常，脚本不会自动执行 dpkg 修复以避免卡死。${Nc}"
+        echo -e "${Yellow}请手动执行以下命令，确认完成后再重新运行脚本：${Nc}"
+        echo "  dpkg --configure -a"
+        echo "  apt-get -f install -y"
+        echo "  apt-get update"
+        return 1
     fi
 }
 
