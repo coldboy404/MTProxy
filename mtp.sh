@@ -20,7 +20,7 @@ CONFIG_DIR="/etc/mtg"
 SERVICE_NAME="mtg"
 INIT_SYSTEM=""
 OS_NAME=""
-SCRIPT_VERSION="2026.05.22.5"
+SCRIPT_VERSION="2026.05.22.6"
 SCRIPT_URL="https://raw.githubusercontent.com/coldboy404/MTProxy/main/mtp.sh"
 
 check_root() { [[ "$(id -u)" != "0" ]] && echo -e "${Red}错误: 请以 root 运行！${Nc}" && exit 1; }
@@ -277,6 +277,11 @@ install_py_core() {
     fi
 
     wget -qO "${PY_DIR}/mtprotoproxy.py" "https://raw.githubusercontent.com/alexbers/mtprotoproxy/master/mtprotoproxy.py"
+    mkdir -p "${PY_DIR}/pyaes"
+    wget -qO "${PY_DIR}/pyaes/__init__.py" "https://raw.githubusercontent.com/alexbers/mtprotoproxy/master/pyaes/__init__.py"
+    wget -qO "${PY_DIR}/pyaes/aes.py" "https://raw.githubusercontent.com/alexbers/mtprotoproxy/master/pyaes/aes.py"
+    wget -qO "${PY_DIR}/pyaes/blockfeeder.py" "https://raw.githubusercontent.com/alexbers/mtprotoproxy/master/pyaes/blockfeeder.py"
+    wget -qO "${PY_DIR}/pyaes/util.py" "https://raw.githubusercontent.com/alexbers/mtprotoproxy/master/pyaes/util.py"
 }
 
 install_py_version() {
