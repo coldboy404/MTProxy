@@ -49,15 +49,33 @@ is_alpine() {
     [[ -f /etc/alpine-release ]] || grep -qi '^ID=alpine' /etc/os-release 2>/dev/null
 }
 
+apt_update_install() {
+    local packages="$*"
+
+    if ! apt-get update; then
+        echo -e "${Yellow}apt 更新失败，尝试修复 dpkg/依赖状态后重试...${Nc}"
+        dpkg --configure -a || true
+        apt-get -f install -y || true
+        apt-get update || return 1
+    fi
+
+    if ! apt-get install -y $packages; then
+        echo -e "${Yellow}apt 安装失败，尝试执行 dpkg --configure -a 与 apt-get -f install 后重试...${Nc}"
+        dpkg --configure -a || true
+        apt-get -f install -y || true
+        apt-get install -y $packages || return 1
+    fi
+}
+
 install_base_deps() {
     if is_alpine && command -v apk >/dev/null 2>&1; then
-        apk add --no-cache bash curl wget tar gzip iproute2 iptables ca-certificates >/dev/null
+        apk add --no-cache bash curl wget tar gzip iproute2 iptables ca-certificates >/dev/null || return 1
     elif command -v apt-get >/dev/null 2>&1; then
-        apt-get update && apt-get install -y curl wget tar gzip iproute2 iptables ca-certificates
+        apt_update_install curl wget tar gzip iproute2 iptables ca-certificates || return 1
     elif command -v yum >/dev/null 2>&1; then
-        yum install -y curl wget tar gzip iproute iptables ca-certificates
+        yum install -y curl wget tar gzip iproute iptables ca-certificates || return 1
     elif command -v dnf >/dev/null 2>&1; then
-        dnf install -y curl wget tar gzip iproute iptables ca-certificates
+        dnf install -y curl wget tar gzip iproute iptables ca-certificates || return 1
     fi
 }
 
@@ -257,20 +275,25 @@ install_go_version() {
 
 install_py_deps() {
     if is_alpine && command -v apk >/dev/null 2>&1; then
-        apk add --no-cache python3 python3-dev py3-pip py3-cryptography git xxd build-base linux-headers
+        apk add --no-cache python3 python3-dev py3-pip py3-cryptography git xxd build-base linux-headers || return 1
     elif command -v apt-get >/dev/null 2>&1; then
-        apt-get update && apt-get install -y python3-dev python3-pip git xxd python3-cryptography
+        apt_update_install python3-dev python3-pip git xxd python3-cryptography || return 1
     else
         echo -e "${Red}Python 版当前仅支持 Alpine/Debian/Ubuntu 系统。${Nc}"
-        exit 1
+        return 1
     fi
 }
 
 pip_install_py_deps() {
+    if ! command -v pip3 >/dev/null 2>&1; then
+        echo -e "${Red}安装失败：未找到 pip3，请检查 Python 依赖是否安装成功。${Nc}"
+        return 1
+    fi
+
     if pip3 install pycryptodome uvloop --break-system-packages 2>/dev/null; then
         return 0
     fi
-    pip3 install pycryptodome uvloop
+    pip3 install pycryptodome uvloop || return 1
 }
 
 install_py_version() {
@@ -278,11 +301,23 @@ install_py_version() {
     echo -e "${Blue}正在配置 Python 环境...${Nc}"
     echo -e "${Yellow}>>> 提示：如果下载进度卡在 'Fetched ...' 不动，请按 1-2 次回车键继续！ <<<${Nc}"
 
-    install_base_deps
-    install_py_deps
+    if ! install_base_deps; then
+        echo -e "${Red}安装失败：基础依赖安装失败，请先修复软件包管理器状态后重试。${Nc}"
+        exit 1
+    fi
+    if ! install_py_deps; then
+        echo -e "${Red}安装失败：Python 依赖安装失败，请先修复软件包管理器状态后重试。${Nc}"
+        exit 1
+    fi
     rm -rf "$PY_DIR"
-    git clone https://github.com/alexbers/mtprotoproxy.git "$PY_DIR"
-    pip_install_py_deps
+    if ! git clone https://github.com/alexbers/mtprotoproxy.git "$PY_DIR"; then
+        echo -e "${Red}安装失败：mtprotoproxy 源码下载失败。${Nc}"
+        exit 1
+    fi
+    if ! pip_install_py_deps; then
+        echo -e "${Red}安装失败：Python pip 依赖安装失败。${Nc}"
+        exit 1
+    fi
 
     mkdir -p "$CONFIG_DIR"
     read -p "伪装域名 (默认: azure.microsoft.com): " DOMAIN
