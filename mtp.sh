@@ -20,7 +20,7 @@ CONFIG_DIR="/etc/mtg"
 SERVICE_NAME="mtg"
 INIT_SYSTEM=""
 OS_NAME=""
-SCRIPT_VERSION="2026.05.22.4"
+SCRIPT_VERSION="2026.05.22.5"
 SCRIPT_URL="https://raw.githubusercontent.com/coldboy404/MTProxy/main/mtp.sh"
 
 check_root() { [[ "$(id -u)" != "0" ]] && echo -e "${Red}错误: 请以 root 运行！${Nc}" && exit 1; }
@@ -304,6 +304,10 @@ PORT = ${PORT}
 USERS = { "tg": "${RAW_S}" }
 MODES = { "classic": False, "secure": False, "tls": True }
 TLS_DOMAIN = "${DOMAIN}"
+MASK_HOST = "${DOMAIN}"
+MASK_PORT = 443
+LISTEN_ADDR_IPV4 = "0.0.0.0"
+LISTEN_ADDR_IPV6 = None
 EOF
 
     rm -f "$BIN_PATH"
