@@ -236,7 +236,7 @@ install_go_version() {
     install_base_deps
     ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
     VERSION=$(curl -s https://api.github.com/repos/9seconds/mtg/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    VERSION=${VERSION:-"v2.1.7"}
+    VERSION=${VERSION:-"v2.2.8"}
     echo -e "${Blue}正在下载 Go 核心...${Nc}"
     wget -qO- "https://github.com/9seconds/mtg/releases/download/${VERSION}/mtg-${VERSION#v}-linux-${ARCH}.tar.gz" | tar xz -C /tmp
     mv /tmp/mtg-*/mtg "$BIN_PATH" && chmod +x "$BIN_PATH"
